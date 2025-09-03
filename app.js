@@ -110,7 +110,7 @@ app.post("/import/test", async (req, res) => {
       const lowerCaseFile = file.toLowerCase();
       return (
         (lowerCaseFile.startsWith("kanban_") ||
-          lowerCaseFile.startsWith("rlgf29_") ||
+          lowerCaseFile.startsWith("rlg29_") ||
           lowerCaseFile.startsWith("ch") ||
           lowerCaseFile.startsWith("color")) &&
         lowerCaseFile.endsWith(".txt")
@@ -136,7 +136,7 @@ app.post("/import/test", async (req, res) => {
 
       if (
         lowerCaseFile.startsWith("kanban_") ||
-        lowerCaseFile.startsWith("rlgf29_")
+        lowerCaseFile.startsWith("rlg29_")
       ) {
         for (const line of lines) {
           const no = line.slice(0, 4).trim();
