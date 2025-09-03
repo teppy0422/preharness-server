@@ -833,7 +833,11 @@ Promise.all([
   ensureChListTableExists(),
   ensureColorListTableExists(),
 ]).then(() => {
-  app.listen(port, () => {
-    console.log(`Server running at http://localhost:${port}`);
+  app.listen(port, "0.0.0.0", (err) => {
+    if (err) {
+      console.error("Server startup error:", err);
+    } else {
+      console.log(`Server running at http://0.0.0.0:${port}`);
+    }
   });
 });
