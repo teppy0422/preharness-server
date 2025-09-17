@@ -826,12 +826,101 @@ app.get("/api/color_list", async (req, res) => {
   }
 });
 
+// work_results 登録API
+app.post("/api/work_results", async (req, res) => {
+  const data = req.body;
+  const client = await pool.connect();
+
+  try {
+    // 受け取ったデータから存在するキーと値を抽出
+    const columns = Object.keys(data);
+    const values = Object.values(data);
+
+    // 動的にクエリを生成
+    const query = `
+      INSERT INTO work_results (${columns.join(", ")})
+      VALUES (${columns.map((_, i) => `$${i + 1}`).join(", ")})
+      RETURNING id;
+    `;
+
+    const result = await client.query(query, values);
+
+    res.status(201).json({
+      success: true,
+      message: "Work result saved successfully.",
+      id: result.rows[0].id,
+    });
+  } catch (error) {
+    console.error("❌ work_results 登録エラー:", error);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  } finally {
+    client.release();
+  }
+});
+
+// work_resultsテーブルがなければ作成する関数
+async function ensureWorkResultsTableExists() {
+  const client = await pool.connect();
+  try {
+    const res = await client.query(
+      `
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' AND table_name = 'work_results'
+      );
+    `
+    );
+
+    const exists = res.rows[0].exists;
+
+    if (!exists) {
+      await client.query(`
+        CREATE TABLE work_results (
+          id BIGSERIAL PRIMARY KEY,
+          actual_count INTEGER,
+          average_speed REAL,
+          machine_type TEXT,
+          machine_serial TEXT,
+          work_name TEXT,
+          username TEXT,
+          efu_lot_num TEXT,
+          efu_p_number TEXT,
+          efu_eng_change TEXT,
+          efu_cfg_no TEXT,
+          efu_sub_assy TEXT,
+          efu_wire_type TEXT,
+          efu_wire_size TEXT,
+          efu_wire_color TEXT,
+          efu_wire_len TEXT,
+          efu_cut_code TEXT,
+          efu_wire_cnt TEXT,
+          efu_delivery_date TEXT,
+          efu_save_completed TEXT,
+          block_terminals_0 TEXT,
+          block_terminals_1 TEXT,
+          block_terminals_length TEXT,
+          block_save_completed TEXT,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        );
+      `);
+      console.log("🆕 work_results テーブルを新規作成しました");
+    } else {
+      console.log("✅ work_results テーブルは既に存在します");
+    }
+  } catch (err) {
+    console.error("❌ work_results テーブル作成エラー:", err);
+  } finally {
+    client.release();
+  }
+}
+
 // 起動
 Promise.all([
   ensureUsersTableExists(),
   ensureMProcessingConditionsTableExists(),
   ensureChListTableExists(),
   ensureColorListTableExists(),
+  ensureWorkResultsTableExists(),
 ]).then(() => {
   app.listen(port, "0.0.0.0", (err) => {
     if (err) {
