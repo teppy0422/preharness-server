@@ -828,13 +828,21 @@ app.get("/api/color_list", async (req, res) => {
 
 // work_results 登録API
 app.post("/api/work_results", async (req, res) => {
+  console.log("[work_results] Request received");
+  console.log("[work_results] Request body:", req.body);
+
   const data = req.body;
-  const client = await pool.connect();
 
   try {
+    const client = await pool.connect();
+    console.log("[work_results] DB connected");
+
     // 受け取ったデータから存在するキーと値を抽出
     const columns = Object.keys(data);
     const values = Object.values(data);
+
+    console.log("[work_results] Columns:", columns);
+    console.log("[work_results] Values:", values);
 
     // 動的にクエリを生成
     const query = `
@@ -843,7 +851,12 @@ app.post("/api/work_results", async (req, res) => {
       RETURNING id;
     `;
 
+    console.log("[work_results] Generated query:", query);
+
     const result = await client.query(query, values);
+    console.log("[work_results] Query executed successfully");
+
+    client.release();
 
     res.status(201).json({
       success: true,
@@ -851,10 +864,10 @@ app.post("/api/work_results", async (req, res) => {
       id: result.rows[0].id,
     });
   } catch (error) {
-    console.error("❌ work_results 登録エラー:", error);
+    console.error("❌ [work_results] 登録エラー:", error);
+    console.error("❌ [work_results] Error details:", error.message);
+    console.error("❌ [work_results] Error stack:", error.stack);
     res.status(500).json({ success: false, error: "Internal server error" });
-  } finally {
-    client.release();
   }
 });
 
@@ -880,6 +893,7 @@ async function ensureWorkResultsTableExists() {
           actual_count INTEGER,
           average_speed REAL,
           machine_type TEXT,
+          machine_number TEXT,
           machine_serial TEXT,
           work_name TEXT,
           username TEXT,
