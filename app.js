@@ -912,6 +912,186 @@ app.get("/api/work_results", async (req, res) => {
   }
 });
 
+// work_results CSV出力API
+app.post("/api/work_results/export", async (req, res) => {
+  console.log("[work_results] CSV export request received");
+  console.log("[work_results] Request body:", req.body);
+
+  const { outputPath, format } = req.body;
+
+  if (!outputPath) {
+    console.error("❌ [work_results] outputPath is required");
+    return res.status(400).json({
+      success: false,
+      error: "outputPath is required"
+    });
+  }
+
+  const client = await pool.connect();
+  try {
+    console.log("[work_results] DB connected for CSV export");
+
+    // 全work_resultsデータを取得
+    const result = await client.query(`
+      SELECT * FROM work_results
+      ORDER BY created_at DESC
+    `);
+
+    console.log(`[work_results] Retrieved ${result.rows.length} records for CSV export`);
+
+    // CSV生成
+    const csvContent = generateWorkResultsCSV(result.rows);
+
+    // ファイル名生成
+    const timestamp = new Date().toISOString()
+      .replace(/[-:]/g, '')
+      .replace(/T/, '_')
+      .split('.')[0]; // YYYYMMDD_HHMMSS
+    const filename = `work_results_${timestamp}.csv`;
+
+    // 出力先パス作成
+    const fullPath = path.join(outputPath, filename);
+
+    // ディレクトリが存在しない場合は作成
+    if (!fs.existsSync(outputPath)) {
+      fs.mkdirSync(outputPath, { recursive: true });
+      console.log(`[work_results] Created output directory: ${outputPath}`);
+    }
+
+    // CSVファイル書き込み
+    await fs.promises.writeFile(fullPath, csvContent, 'utf8');
+    console.log(`✅ [work_results] CSV export successful: ${fullPath}`);
+
+    res.json({
+      success: true,
+      message: 'CSV出力が完了しました',
+      filename: filename,
+      path: fullPath,
+      recordCount: result.rows.length
+    });
+
+  } catch (error) {
+    console.error("❌ [work_results] CSV export error:", error);
+    res.status(500).json({
+      success: false,
+      error: "CSV出力に失敗しました",
+      details: error.message
+    });
+  } finally {
+    client.release();
+  }
+});
+
+// CSV生成関数
+function generateWorkResultsCSV(workResults) {
+  // ヘッダー行（日本語表示名）
+  const headers = [
+    '準完日',
+    '作業名',
+    'ユーザー',
+    '実績数',
+    '平均速度',
+    '機種',
+    '号機',
+    '管理No',
+    'ロット番号',
+    '品番',
+    'CFG No',
+    'ワイヤータイプ',
+    'ワイヤーサイズ',
+    'ワイヤー色',
+    'ワイヤー長',
+    'ワイヤー本数',
+    '端子1',
+    '端子2',
+    '端子長',
+    '作業日時'
+  ];
+
+  // データ行生成
+  const rows = workResults.map(row => [
+    formatDeliveryDateForCSV(row.efu_delivery_date), // 250729 → 2025/07/29
+    row.work_name || '未設定',
+    row.username || '未設定',
+    `${row.actual_count || 0}個`,
+    `${(row.average_speed || 0).toFixed(1)}個/分`,
+    row.machine_type || '未設定',
+    row.machine_number || '未設定',
+    row.machine_serial || '未設定',
+    row.efu_lot_num || '未設定',
+    row.efu_p_number || '未設定',
+    row.efu_cfg_no || '未設定',
+    row.efu_wire_type || '未設定',
+    row.efu_wire_size || '未設定',
+    row.efu_wire_color || '未設定',
+    row.efu_wire_len || '未設定',
+    row.efu_wire_cnt || '未設定',
+    row.block_terminals_0 || '未設定',
+    row.block_terminals_1 || '未設定',
+    row.block_terminals_length || '未設定',
+    formatDateTimeForCSV(row.created_at)
+  ]);
+
+  // CSV形式に変換
+  const csvLines = [headers, ...rows].map(row =>
+    row.map(cell => `"${cell}"`).join(',')
+  );
+
+  return csvLines.join('\n');
+}
+
+// 準完日フォーマット関数（サーバー側）
+function formatDeliveryDateForCSV(deliveryDateStr) {
+  if (!deliveryDateStr || deliveryDateStr === '未設定') {
+    return '未設定';
+  }
+
+  try {
+    // YYMMDD形式（6桁）の場合
+    if (deliveryDateStr.length === 6) {
+      const year = parseInt(deliveryDateStr.substring(0, 2));
+      const month = deliveryDateStr.substring(2, 4);
+      const day = deliveryDateStr.substring(4, 6);
+
+      // 年の補正（2桁年 -> 4桁年）
+      const fullYear = year < 50 ? 2000 + year : 1900 + year;
+
+      return `${fullYear}/${month}/${day}`;
+    }
+
+    // YYYYMMDD形式（8桁）の場合
+    if (deliveryDateStr.length === 8) {
+      const year = deliveryDateStr.substring(0, 4);
+      const month = deliveryDateStr.substring(4, 6);
+      const day = deliveryDateStr.substring(6, 8);
+
+      return `${year}/${month}/${day}`;
+    }
+
+    // その他の形式はそのまま表示
+    return deliveryDateStr;
+  } catch (e) {
+    return deliveryDateStr;
+  }
+}
+
+// 作業日時フォーマット関数（サーバー側）
+function formatDateTimeForCSV(dateTimeStr) {
+  if (!dateTimeStr) return '未設定';
+  try {
+    const dateTime = new Date(dateTimeStr);
+    return dateTime.toLocaleString('ja-JP', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  } catch (e) {
+    return dateTimeStr;
+  }
+}
+
 // work_resultsテーブルがなければ作成する関数
 async function ensureWorkResultsTableExists() {
   const client = await pool.connect();
