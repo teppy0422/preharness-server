@@ -64,3 +64,9 @@ copy 019
 - カラム machine_number を追加
 
 #### 004
+
+- work_results を返す API を追加
+
+#### 005
+
+-

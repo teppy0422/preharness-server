@@ -413,14 +413,11 @@ async function ensureColorListTableExists() {
   const client = await pool.connect();
   try {
     const res = await client.query(
-      `
-      SELECT EXISTS (
+      `SELECT EXISTS (
         SELECT FROM information_schema.tables 
         WHERE table_schema = 'public' AND table_name = 'color_list'
-      );
-    `
+      );`
     );
-
     const exists = res.rows[0].exists;
 
     if (!exists) {
@@ -671,7 +668,6 @@ app.get("/api/users", async (req, res) => {
       "SELECT id, username, iconname FROM users"
     );
     client.release();
-
     const nasIp = req.headers.host.split(":")[0]; // 呼び出し元IP
     const users = result.rows.map((u) => ({
       id: u.id,
@@ -679,7 +675,6 @@ app.get("/api/users", async (req, res) => {
       iconname: u.iconname,
       nasIp, // Flutter側でNAS IPでアイコン画像取得用に使用
     }));
-
     res.json(users);
   } catch (err) {
     console.error("DB error:", err);
@@ -832,7 +827,6 @@ app.post("/api/work_results", async (req, res) => {
   console.log("[work_results] Request body:", req.body);
 
   const data = req.body;
-
   try {
     const client = await pool.connect();
     console.log("[work_results] DB connected");
@@ -871,6 +865,53 @@ app.post("/api/work_results", async (req, res) => {
   }
 });
 
+// work_results 取得API
+app.get("/api/work_results", async (req, res) => {
+  console.log("[work_results] GET Request received");
+
+  const { limit = 50, order = "desc" } = req.query;
+  const limitValue = Math.min(parseInt(limit) || 50, 200); // 最大200件
+  const orderValue = order === "asc" ? "ASC" : "DESC";
+
+  try {
+    const client = await pool.connect();
+    console.log("[work_results] DB connected for GET");
+
+    const query = `
+      SELECT
+        id, actual_count, average_speed, machine_type, machine_number, machine_serial,
+        work_name, username, efu_lot_num, efu_p_number, efu_eng_change, efu_cfg_no,
+        efu_sub_assy, efu_wire_type, efu_wire_size, efu_wire_color, efu_wire_len,
+        efu_cut_code, efu_wire_cnt, efu_delivery_date, efu_save_completed,
+        block_terminals_0, block_terminals_1, block_terminals_length, block_save_completed,
+        created_at
+      FROM work_results
+      ORDER BY created_at ${orderValue}
+      LIMIT $1
+    `;
+
+    console.log(
+      "[work_results] Executing query with limit:",
+      limitValue,
+      "order:",
+      orderValue
+    );
+
+    const result = await client.query(query, [limitValue]);
+    client.release();
+
+    console.log(`✅ [work_results] 取得成功: ${result.rows.length}件`);
+    res.status(200).json(result.rows);
+  } catch (error) {
+    console.error("❌ [work_results] 取得エラー:", error);
+    res.status(500).json({
+      success: false,
+      error: "作業実績の取得に失敗しました",
+      details: error.message,
+    });
+  }
+});
+
 // work_resultsテーブルがなければ作成する関数
 async function ensureWorkResultsTableExists() {
   const client = await pool.connect();
@@ -883,9 +924,7 @@ async function ensureWorkResultsTableExists() {
       );
     `
     );
-
     const exists = res.rows[0].exists;
-
     if (!exists) {
       await client.query(`
         CREATE TABLE work_results (
