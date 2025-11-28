@@ -879,7 +879,12 @@ app.get("/api/work_results", async (req, res) => {
 
     const query = `
       SELECT
-        id, actual_count, average_speed, machine_type, machine_number, machine_serial,
+        id, actual_count, average_speed,
+        micrometer_serial_number,
+        applicator_name, applicator_serial_number,
+        terminal_name,terminal_serial_number,
+        measured_front_ch,measured_back_ch,measured_front_cw,measured_back_cw,
+        machine_type, machine_number, machine_serial,
         work_name, username, efu_lot_num, efu_p_number, efu_eng_change, efu_cfg_no,
         efu_sub_assy, efu_wire_type, efu_wire_size, efu_wire_color, efu_wire_len,
         efu_cut_code, efu_wire_cnt, efu_delivery_date, efu_save_completed,
@@ -923,7 +928,7 @@ app.post("/api/work_results/export", async (req, res) => {
     console.error("❌ [work_results] outputPath is required");
     return res.status(400).json({
       success: false,
-      error: "outputPath is required"
+      error: "outputPath is required",
     });
   }
 
@@ -937,16 +942,19 @@ app.post("/api/work_results/export", async (req, res) => {
       ORDER BY created_at DESC
     `);
 
-    console.log(`[work_results] Retrieved ${result.rows.length} records for CSV export`);
+    console.log(
+      `[work_results] Retrieved ${result.rows.length} records for CSV export`
+    );
 
     // CSV生成
     const csvContent = generateWorkResultsCSV(result.rows);
 
-    // ファイル名生成
-    const timestamp = new Date().toISOString()
-      .replace(/[-:]/g, '')
-      .replace(/T/, '_')
-      .split('.')[0]; // YYYYMMDD_HHMMSS
+    // ファイル名生成（日本時間）
+    const japanTime = new Date(new Date().getTime() + 9 * 60 * 60 * 1000);
+    const isoString = japanTime.toISOString();
+    const datePart = isoString.substring(0, 10).replace(/-/g, ""); // YYYYMMDD
+    const timePart = isoString.substring(11, 19).replace(/:/g, "-"); // HH_MM_SS
+    const timestamp = `${datePart}_${timePart}`; // YYYYMMDD_HH_MM_SS
     const filename = `work_results_${timestamp}.csv`;
 
     // 出力先パス作成
@@ -959,23 +967,22 @@ app.post("/api/work_results/export", async (req, res) => {
     }
 
     // CSVファイル書き込み
-    await fs.promises.writeFile(fullPath, csvContent, 'utf8');
+    await fs.promises.writeFile(fullPath, csvContent, "utf8");
     console.log(`✅ [work_results] CSV export successful: ${fullPath}`);
 
     res.json({
       success: true,
-      message: 'CSV出力が完了しました',
+      message: "CSV出力が完了しました",
       filename: filename,
       path: fullPath,
-      recordCount: result.rows.length
+      recordCount: result.rows.length,
     });
-
   } catch (error) {
     console.error("❌ [work_results] CSV export error:", error);
     res.status(500).json({
       success: false,
       error: "CSV出力に失敗しました",
-      details: error.message
+      details: error.message,
     });
   } finally {
     client.release();
@@ -986,64 +993,82 @@ app.post("/api/work_results/export", async (req, res) => {
 function generateWorkResultsCSV(workResults) {
   // ヘッダー行（日本語表示名）
   const headers = [
-    '準完日',
-    '作業名',
-    'ユーザー',
-    '実績数',
-    '平均速度',
-    '機種',
-    '号機',
-    '管理No',
-    'ロット番号',
-    '品番',
-    'CFG No',
-    'ワイヤータイプ',
-    'ワイヤーサイズ',
-    'ワイヤー色',
-    'ワイヤー長',
-    'ワイヤー本数',
-    '端子1',
-    '端子2',
-    '端子長',
-    '作業日時'
+    "準完日",
+    "作業名",
+    "ユーザー",
+    "マイクロメーター",
+    "アプリ品番",
+    "アプリシリアル",
+    "端子品番",
+    "ロットNo",
+    "前足CH",
+    "後足CH",
+    "前足CW",
+    "後足CW",
+    "実績数",
+    "平均速度",
+    "機種",
+    "号機",
+    "管理No",
+    "ロット番号",
+    "品番",
+    "CFG No",
+    "ワイヤータイプ",
+    "ワイヤーサイズ",
+    "ワイヤー色",
+    "ワイヤー長",
+    "ワイヤー本数",
+    "端子1",
+    "端子2",
+    "端子長",
+    "作業日時",
   ];
 
   // データ行生成
-  const rows = workResults.map(row => [
+  const rows = workResults.map((row) => [
     formatDeliveryDateForCSV(row.efu_delivery_date), // 250729 → 2025/07/29
-    row.work_name || '未設定',
-    row.username || '未設定',
+    row.work_name || "未設定",
+    row.username || "未設定",
+    row.micrometer_serial_number || "未設定",
+    row.applicator_name || "未設定",
+    row.applicator_serial_number || "未設定",
+    row.terminal_name || "未設定",
+    row.terminal_serial_number || "未設定",
+    row.measured_front_ch || "未設定",
+    row.measured_back_ch || "未設定",
+    row.measured_front_cw || "未設定",
+    row.measured_back_cw || "未設定",
     `${row.actual_count || 0}個`,
     `${(row.average_speed || 0).toFixed(1)}個/分`,
-    row.machine_type || '未設定',
-    row.machine_number || '未設定',
-    row.machine_serial || '未設定',
-    row.efu_lot_num || '未設定',
-    row.efu_p_number || '未設定',
-    row.efu_cfg_no || '未設定',
-    row.efu_wire_type || '未設定',
-    row.efu_wire_size || '未設定',
-    row.efu_wire_color || '未設定',
-    row.efu_wire_len || '未設定',
-    row.efu_wire_cnt || '未設定',
-    row.block_terminals_0 || '未設定',
-    row.block_terminals_1 || '未設定',
-    row.block_terminals_length || '未設定',
-    formatDateTimeForCSV(row.created_at)
+    row.machine_type || "未設定",
+    row.machine_number || "未設定",
+    row.machine_serial || "未設定",
+    row.efu_lot_num || "未設定",
+    row.efu_p_number || "未設定",
+    row.efu_cfg_no || "未設定",
+    row.efu_wire_type || "未設定",
+    row.efu_wire_size || "未設定",
+    row.efu_wire_color || "未設定",
+    row.efu_wire_len || "未設定",
+    row.efu_wire_cnt || "未設定",
+    row.block_terminals_0 || "未設定",
+    row.block_terminals_1 || "未設定",
+    row.block_terminals_length || "未設定",
+    formatDateTimeForCSV(row.created_at),
   ]);
 
   // CSV形式に変換
-  const csvLines = [headers, ...rows].map(row =>
-    row.map(cell => `"${cell}"`).join(',')
+  const csvLines = [headers, ...rows].map((row) =>
+    row.map((cell) => `"${cell}"`).join(",")
   );
 
-  return csvLines.join('\n');
+  return csvLines.join("\n");
 }
 
 // 準完日フォーマット関数（サーバー側）
 function formatDeliveryDateForCSV(deliveryDateStr) {
-  if (!deliveryDateStr || deliveryDateStr === '未設定') {
-    return '未設定';
+  if (!deliveryDateStr || deliveryDateStr === "未設定") {
+    return "未設定";
   }
 
   try {
@@ -1077,15 +1102,15 @@ function formatDeliveryDateForCSV(deliveryDateStr) {
 
 // 作業日時フォーマット関数（サーバー側）
 function formatDateTimeForCSV(dateTimeStr) {
-  if (!dateTimeStr) return '未設定';
+  if (!dateTimeStr) return "未設定";
   try {
     const dateTime = new Date(dateTimeStr);
-    return dateTime.toLocaleString('ja-JP', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit'
+    return dateTime.toLocaleString("ja-JP", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
     });
   } catch (e) {
     return dateTimeStr;
@@ -1096,52 +1121,98 @@ function formatDateTimeForCSV(dateTimeStr) {
 async function ensureWorkResultsTableExists() {
   const client = await pool.connect();
   try {
-    const res = await client.query(
-      `
-      SELECT EXISTS (
-        SELECT FROM information_schema.tables 
+    // 期待されるカラム定義
+    const expectedColumns = [
+      { name: "id", type: "BIGSERIAL PRIMARY KEY" },
+      { name: "actual_count", type: "INTEGER" },
+      { name: "micrometer_serial_number", type: "TEXT" },
+      { name: "applicator_name", type: "TEXT" },
+      { name: "applicator_serial_number", type: "TEXT" },
+      { name: "terminal_name", type: "TEXT" },
+      { name: "terminal_serial_number", type: "TEXT" },
+      { name: "average_speed", type: "REAL" },
+      { name: "block_terminals_0", type: "TEXT" },
+      { name: "block_terminals_1", type: "TEXT" },
+      { name: "block_terminals_length", type: "TEXT" },
+      { name: "block_save_completed", type: "TEXT" },
+      { name: "efu_lot_num", type: "TEXT" },
+      { name: "efu_p_number", type: "TEXT" },
+      { name: "efu_eng_change", type: "TEXT" },
+      { name: "efu_cfg_no", type: "TEXT" },
+      { name: "efu_sub_assy", type: "TEXT" },
+      { name: "efu_wire_type", type: "TEXT" },
+      { name: "efu_wire_size", type: "TEXT" },
+      { name: "efu_wire_color", type: "TEXT" },
+      { name: "efu_wire_len", type: "TEXT" },
+      { name: "efu_cut_code", type: "TEXT" },
+      { name: "efu_wire_cnt", type: "TEXT" },
+      { name: "efu_delivery_date", type: "TEXT" },
+      { name: "efu_save_completed", type: "TEXT" },
+      { name: "machine_type", type: "TEXT" },
+      { name: "machine_number", type: "TEXT" },
+      { name: "machine_serial", type: "TEXT" },
+      { name: "measured_front_ch", type: "TEXT" },
+      { name: "measured_back_ch", type: "TEXT" },
+      { name: "measured_front_cw", type: "TEXT" },
+      { name: "measured_back_cw", type: "TEXT" },
+      { name: "work_name", type: "TEXT" },
+      { name: "username", type: "TEXT" },
+      { name: "created_at", type: "TIMESTAMPTZ DEFAULT NOW()" },
+    ];
+
+    // テーブル存在チェック
+    const tableExists = await client.query(
+      `SELECT EXISTS (
+        SELECT FROM information_schema.tables
         WHERE table_schema = 'public' AND table_name = 'work_results'
-      );
-    `
+      );`
     );
-    const exists = res.rows[0].exists;
-    if (!exists) {
-      await client.query(`
-        CREATE TABLE work_results (
-          id BIGSERIAL PRIMARY KEY,
-          actual_count INTEGER,
-          average_speed REAL,
-          machine_type TEXT,
-          machine_number TEXT,
-          machine_serial TEXT,
-          work_name TEXT,
-          username TEXT,
-          efu_lot_num TEXT,
-          efu_p_number TEXT,
-          efu_eng_change TEXT,
-          efu_cfg_no TEXT,
-          efu_sub_assy TEXT,
-          efu_wire_type TEXT,
-          efu_wire_size TEXT,
-          efu_wire_color TEXT,
-          efu_wire_len TEXT,
-          efu_cut_code TEXT,
-          efu_wire_cnt TEXT,
-          efu_delivery_date TEXT,
-          efu_save_completed TEXT,
-          block_terminals_0 TEXT,
-          block_terminals_1 TEXT,
-          block_terminals_length TEXT,
-          block_save_completed TEXT,
-          created_at TIMESTAMPTZ DEFAULT NOW()
-        );
-      `);
+
+    if (!tableExists.rows[0].exists) {
+      // テーブルが存在しない場合は新規作成
+      const createColumns = expectedColumns
+        .map((col) => `${col.name} ${col.type}`)
+        .join(", ");
+
+      await client.query(`CREATE TABLE work_results (${createColumns});`);
       console.log("🆕 work_results テーブルを新規作成しました");
     } else {
-      console.log("✅ work_results テーブルは既に存在します");
+      // テーブルが存在する場合はカラムチェック
+      const existingColumns = await client.query(
+        `SELECT column_name, data_type
+         FROM information_schema.columns
+         WHERE table_name = 'work_results' AND table_schema = 'public';`
+      );
+
+      const existingColumnNames = existingColumns.rows.map(
+        (row) => row.column_name
+      );
+
+      // 不足カラムを検出（idは除外）
+      const missingColumns = expectedColumns.filter(
+        (col) => col.name !== "id" && !existingColumnNames.includes(col.name)
+      );
+
+      // 不足カラムを追加
+      for (const missingCol of missingColumns) {
+        await client.query(
+          `ALTER TABLE work_results ADD COLUMN ${missingCol.name} ${missingCol.type};`
+        );
+        console.log(
+          `🆕 work_results テーブルに ${missingCol.name} カラムを追加しました`
+        );
+      }
+
+      if (missingColumns.length === 0) {
+        console.log("✅ work_results テーブルは最新です");
+      } else {
+        console.log(
+          `✅ work_results テーブルに ${missingColumns.length} 個のカラムを追加しました`
+        );
+      }
     }
   } catch (err) {
-    console.error("❌ work_results テーブル作成エラー:", err);
+    console.error("❌ work_results テーブル作成/更新エラー:", err);
   } finally {
     client.release();
   }
