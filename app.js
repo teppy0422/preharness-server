@@ -95,6 +95,157 @@ app.post("/import", async (req, res) => {
   }
 });
 
+// wire_lenを数値化する関数（00710 → 710, 00000 → 0）
+function normalizeWireLen(wireLenStr) {
+  if (!wireLenStr) return "0";
+  const num = parseInt(wireLenStr, 10);
+  return isNaN(num) ? "0" : num.toString();
+}
+
+// 同じybmグループ内で電線長を共有する関数
+function shareWireLenWithinYbmGroup(records) {
+  // ybmごとに電線長を持つレコードを探す
+  for (const record of records) {
+    // ybmが設定されていて、電線長が0でない場合
+    const normalizedLen = normalizeWireLen(record.wire_len);
+    if (record.ybm && record.ybm !== "" && normalizedLen !== "0") {
+      // 同じp_number、eng_change、ybmを持つ他のレコードに電線長を設定
+      for (const targetRecord of records) {
+        const targetNormalizedLen = normalizeWireLen(targetRecord.wire_len);
+        if (
+          targetRecord.p_number === record.p_number &&
+          targetRecord.eng_change === record.eng_change &&
+          targetRecord.ybm === record.ybm &&
+          targetNormalizedLen === "0"
+        ) {
+          targetRecord.wire_len = normalizedLen;
+        }
+      }
+      // 自分自身も正規化
+      record.wire_len = normalizedLen;
+    } else {
+      // 電線長を正規化
+      record.wire_len = normalizedLen;
+    }
+  }
+}
+
+// ybmを設定する関数
+function setYbmBasedOnCfgNoSub(records) {
+  // cfg_no_subが"0000"でない行を探して、一致する行のybmを設定
+  for (const record of records) {
+    if (record.ybm && record.ybm !== "" && record.cfg_no_sub !== "0000") {
+      // 条件に一致する他のレコードを探す
+      for (const targetRecord of records) {
+        if (
+          targetRecord.p_number === record.p_number &&
+          targetRecord.eng_change === record.eng_change &&
+          targetRecord.cfg_no === record.cfg_no_sub
+        ) {
+          // 見つかったレコードのybmを設定
+          targetRecord.ybm = record.ybm;
+        }
+      }
+    }
+  }
+}
+
+// RLTF???Aファイルのインポート処理
+async function processRltfFile(lines, client) {
+  // まず全行を読み込んでパースする
+  const records = [];
+
+  for (const line of lines) {
+    // 空行はスキップ
+    if (line.trim() === "") continue;
+
+    // 固定長フォーマットから抽出
+    const p_number = line.slice(0, 15).trim(); // 1-15列目
+    const eng_change = line.slice(18, 21).trim(); // 19-21列目
+    const cfg_no = line.slice(26, 30).trim(); // 27-30列目
+    const wire_type = line.slice(31, 35).trim(); // 32-35列目
+    const wire_size = line.slice(35, 38).trim(); // 36-38列目
+    const wire_color = line.slice(38, 40).trim(); // 39-40列目
+    const circuit_1 = line.slice(95, 99).trim(); // 95-99列目
+    const circuit_2 = line.slice(101, 105).trim(); // 101-105列目
+    const cfg_no_sub = line.slice(106, 111).trim(); // 107-111列目
+    let ybm = line.slice(116, 123).trim(); // 117-123列目
+    const term_proc_inst_1 = "Z"; // 固定値
+    const term_proc_inst_2 = "Z"; // 固定値
+    const mark_color_1 = line.slice(168, 170).trim(); // 168-170列目
+    const mark_color_2 = line.slice(172, 174).trim(); // 172-174列目
+    const term_part_no_1 = line.slice(174, 184).trim(); // 174-184列目
+    const add_parts_1 = line.slice(194, 204).trim(); // 194-204列目
+    const term_part_no_2 = line.slice(274, 284).trim(); // 274-284列目
+    const add_parts_2 = line.slice(294, 304).trim(); // 294-304列目
+
+    // wire_lenの取得：ybmがある場合は148-152列目、ない場合は64-69列目
+    let wire_len;
+    if (ybm && ybm !== "") {
+      wire_len = line.slice(147, 152).trim(); // 148-152列目
+    } else {
+      wire_len = line.slice(63, 68).trim(); // 64-68列目
+    }
+
+    records.push({
+      p_number,
+      eng_change,
+      cfg_no,
+      wire_type,
+      wire_size,
+      wire_color,
+      circuit_1,
+      circuit_2,
+      term_proc_inst_1,
+      term_proc_inst_2,
+      mark_color_1,
+      mark_color_2,
+      term_part_no_1,
+      add_parts_1,
+      term_part_no_2,
+      add_parts_2,
+      wire_len,
+      cfg_no_sub,
+      ybm,
+    });
+  }
+
+  // ybm設定ロジック
+  setYbmBasedOnCfgNoSub(records);
+
+  // 電線長共有ロジック
+  shareWireLenWithinYbmGroup(records);
+
+  // DBにINSERT
+  for (const record of records) {
+    await client.query(
+      `INSERT INTO m_processing_shield (p_number, eng_change, cfg_no, wire_type, wire_size, wire_color, circuit_1, circuit_2, term_proc_inst_1, term_proc_inst_2, mark_color_1, mark_color_2, term_part_no_1, add_parts_1, term_part_no_2, add_parts_2, wire_len, cfg_no_sub, ybm)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
+      [
+        record.p_number,
+        record.eng_change,
+        record.cfg_no,
+        record.wire_type,
+        record.wire_size,
+        record.wire_color,
+        record.circuit_1,
+        record.circuit_2,
+        record.term_proc_inst_1,
+        record.term_proc_inst_2,
+        record.mark_color_1,
+        record.mark_color_2,
+        record.term_part_no_1,
+        record.add_parts_1,
+        record.term_part_no_2,
+        record.add_parts_2,
+        record.wire_len,
+        record.cfg_no_sub,
+        record.ybm,
+      ]
+    );
+  }
+}
+
 app.post("/import/test", async (req, res) => {
   const INPUT_DIR = req.body.path_01;
 
@@ -108,11 +259,19 @@ app.post("/import/test", async (req, res) => {
   try {
     const files = fs.readdirSync(INPUT_DIR).filter((file) => {
       const lowerCaseFile = file.toLowerCase();
+
+      // RLTFファイルの判定：rltfで始まり、7文字目がaのファイル
+      const isRltfA =
+        lowerCaseFile.startsWith("rltf") &&
+        lowerCaseFile.length >= 7 &&
+        lowerCaseFile.charAt(6) === "a";
+
       return (
         (lowerCaseFile.startsWith("kanban_") ||
           lowerCaseFile.startsWith("rlg29_") ||
           lowerCaseFile.startsWith("ch") ||
-          lowerCaseFile.startsWith("color")) &&
+          lowerCaseFile.startsWith("color") ||
+          isRltfA) &&
         lowerCaseFile.endsWith(".txt")
       );
     });
@@ -134,7 +293,16 @@ app.post("/import/test", async (req, res) => {
       const content = fs.readFileSync(filePath, "utf8");
       const lines = content.trim().split("\n");
 
-      if (
+      // RLTFファイルの判定
+      const isRltfA =
+        lowerCaseFile.startsWith("rltf") &&
+        lowerCaseFile.length >= 7 &&
+        lowerCaseFile.charAt(6) === "a";
+
+      if (isRltfA) {
+        // RLTFファイルの処理
+        await processRltfFile(lines, client);
+      } else if (
         lowerCaseFile.startsWith("kanban_") ||
         lowerCaseFile.startsWith("rlg29_")
       ) {
@@ -459,7 +627,7 @@ async function ensureMProcessingConditionsTableExists() {
     const res = await client.query(
       `
       SELECT EXISTS (
-        SELECT FROM information_schema.tables 
+        SELECT FROM information_schema.tables
         WHERE table_schema = 'public' AND table_name = 'm_processing_conditions'
       );
     `
@@ -511,6 +679,71 @@ async function ensureMProcessingConditionsTableExists() {
     }
   } catch (err) {
     console.error("❌ m_processing_conditions テーブル作成エラー:", err);
+  } finally {
+    client.release();
+  }
+}
+// m_processing_shieldが無ければ作成する関数
+async function ensureMProcessingShieldTableExists() {
+  const client = await pool.connect();
+  try {
+    const res = await client.query(
+      `
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'm_processing_shield'
+      );
+    `
+    );
+
+    const exists = res.rows[0].exists;
+
+    if (!exists) {
+      await client.query(
+        `
+        CREATE TABLE m_processing_shield (
+          id BIGSERIAL PRIMARY KEY,
+          no TEXT,
+          delivery_month TEXT,
+          cut_code TEXT,
+          fumei_1 TEXT,
+          lot_num TEXT,
+          fumei_2 TEXT,
+          fumei_3 TEXT,
+          p_number TEXT,
+          eng_change TEXT,
+          cfg_no TEXT,
+          ybm TEXT,
+          cfg_no_sub TEXT,
+          wire_type TEXT,
+          wire_size TEXT,
+          wire_color TEXT,
+          wire_len TEXT,
+          circuit_1 TEXT,
+          circuit_2 TEXT,
+          term_proc_inst_1 TEXT,
+          term_proc_inst_2 TEXT,
+          mark_color_1 TEXT,
+          mark_color_2 TEXT,
+          strip_len_1 TEXT,
+          strip_len_2 TEXT,
+          term_part_no_1 TEXT,
+          term_part_no_2 TEXT,
+          add_parts_1 TEXT,
+          add_parts_2 TEXT,
+          wire_cnt TEXT,
+          fumei_4 TEXT,
+          delivery_date TEXT,
+          asm_code TEXT
+        );
+      `
+      );
+      console.log("🆕 m_processing_shield テーブルを新規作成しました");
+    } else {
+      console.log("✅ m_processing_shield テーブルは既に存在します");
+    }
+  } catch (err) {
+    console.error("❌ m_processing_shield テーブル作成エラー:", err);
   } finally {
     client.release();
   }
@@ -1222,6 +1455,7 @@ async function ensureWorkResultsTableExists() {
 Promise.all([
   ensureUsersTableExists(),
   ensureMProcessingConditionsTableExists(),
+  ensureMProcessingShieldTableExists(),
   ensureChListTableExists(),
   ensureColorListTableExists(),
   ensureWorkResultsTableExists(),
